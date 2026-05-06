@@ -230,38 +230,27 @@ const PORT = process.env.PORT || 5000;
 // SECURITY MIDDLEWARE
 // ============================================================================
 
-// 1. DEBUG: Open CORS & Verbose Logging
+// 1. ROBUST CORS & DEBUGGING
 app.use((req, res, next) => {
     const origin = req.headers.origin;
-    const start = Date.now();
     
-    console.log(`[NETWORK DEBUG] Incoming ${req.method} request to ${req.url}`);
-    console.log(`[NETWORK DEBUG] Origin: ${origin}`);
-    console.log(`[NETWORK DEBUG] Headers:`, JSON.stringify(req.headers));
-
-    res.on('finish', () => {
-        const duration = Date.now() - start;
-        console.log(`[API] ${req.method} ${req.url} | Status: ${res.statusCode} | ${duration}ms`);
-    });
-    
-    // TEMPORARILY ALLOW ALL FOR DEBUGGING
-    if (origin) {
-        res.header('Access-Control-Allow-Origin', origin);
-    } else {
-        res.header('Access-Control-Allow-Origin', '*');
-    }
-    
+    // Set robust CORS headers
+    res.header('Access-Control-Allow-Origin', origin || '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-client-info');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-client-info');
     
-    // Credentials cannot be true if Origin is '*'
     if (origin) {
         res.header('Access-Control-Allow-Credentials', 'true');
     }
-    
+
+    // Handle pre-flight (OPTIONS) requests immediately
     if (req.method === 'OPTIONS') {
         return res.sendStatus(200);
     }
+    
+    // Logging for debugging
+    console.log(`[API LOG] ${req.method} ${req.url} from ${origin || 'Local/App'}`);
+    
     next();
 });
 
