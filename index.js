@@ -230,27 +230,17 @@ const PORT = process.env.PORT || 5000;
 // SECURITY MIDDLEWARE
 // ============================================================================
 
-// 1. ROBUST CORS & DEBUGGING
-app.use((req, res, next) => {
-    const origin = req.headers.origin;
-    
-    // Set robust CORS headers
-    res.header('Access-Control-Allow-Origin', origin || '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-client-info');
-    
-    if (origin) {
-        res.header('Access-Control-Allow-Credentials', 'true');
-    }
+// 1. ROBUST CORS (Using industry-standard package)
+app.use(cors({
+    origin: true, // Reflects the request origin, allowing any dashboard to connect
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'x-client-info']
+}));
 
-    // Handle pre-flight (OPTIONS) requests immediately
-    if (req.method === 'OPTIONS') {
-        return res.sendStatus(200);
-    }
-    
-    // Logging for debugging
-    console.log(`[API LOG] ${req.method} ${req.url} from ${origin || 'Local/App'}`);
-    
+// Logging for debugging
+app.use((req, res, next) => {
+    console.log(`[API LOG] ${req.method} ${req.url} from ${req.headers.origin || 'Local/App'}`);
     next();
 });
 
