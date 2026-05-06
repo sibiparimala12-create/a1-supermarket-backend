@@ -247,7 +247,11 @@ const PORT = process.env.PORT || 5000;
 // ============================================================================
 
 // 1. SIMPLEST CORS (Most Compatible)
-app.use(cors());
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'x-client-info']
+}));
 
 // Connection Test Route
 app.get('/api/ping', (req, res) => res.json({ message: 'pong', timestamp: new Date().toISOString() }));
