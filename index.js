@@ -29,6 +29,7 @@ const bodyParser = require('body-parser');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
+const jwt = require('jsonwebtoken');
 const cron = require('node-cron');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
@@ -55,6 +56,21 @@ if (!supabaseUrl || !supabaseKey) {
 }
 
 const supabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseKey || 'placeholder');
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function generateToken(profile) {
+    return jwt.sign(
+        { 
+            email: profile.email, 
+            role: profile.role, 
+            status: profile.status, 
+            isApproved: profile.status === 'approved' 
+        },
+        JWT_SECRET,
+        { expiresIn: JWT_EXPIRY }
+    );
+}
 
 function sanitize(str) {
     if (typeof str !== 'string') return str;
@@ -230,17 +246,35 @@ const PORT = process.env.PORT || 5000;
 // SECURITY MIDDLEWARE
 // ============================================================================
 
-// 1. ROBUST CORS (Using industry-standard package)
+// 1. SECURE CORS (Trusted Origins Only)
+const allowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'https://a1supermarket.com',
+    'https://www.a1supermarket.com'
+];
+
 app.use(cors({
-    origin: true, // Reflects the request origin, allowing any dashboard to connect
+    origin: function(origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl)
+        if (!origin) return callback(null, true);
+        
+        // Clean origin (remove trailing slash for comparison)
+        const cleanOrigin = origin.replace(/\/$/, '');
+        
+        if (allowedOrigins.indexOf(cleanOrigin) !== -1 || cleanOrigin.startsWith('http://localhost:')) {
+            return callback(null, true);
+        }
+        return callback(new Error('CORS Policy: This origin is not allowed access.'), false);
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'x-client-info']
 }));
 
-// Logging for debugging
+// Logging for security auditing
 app.use((req, res, next) => {
-    console.log(`[API LOG] ${req.method} ${req.url} from ${req.headers.origin || 'Local/App'}`);
+    console.log(`[AUTH LOG] ${req.method} ${req.url} | Origin: ${req.headers.origin || 'Native App'}`);
     next();
 });
 
@@ -253,13 +287,13 @@ app.use(helmet({
 // 3. Body parser with size limit (prevents payload bombs)
 app.use(bodyParser.json({ limit: '1mb' }));
 
-// 4. Global rate limiter — 100 requests per 15 minutes per IP
+// 4. Global rate limiter — Increased to 1000 for the Board Demo
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 200,
+    max: 1000, // Safe for demo with many viewers
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Too many requests. Please try again later.' },
+    message: { error: 'Too many requests from this IP. Please try again in 15 minutes.' },
 });
 app.use(globalLimiter);
 
