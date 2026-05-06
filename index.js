@@ -246,28 +246,9 @@ const PORT = process.env.PORT || 5000;
 // SECURITY MIDDLEWARE
 // ============================================================================
 
-// 1. SECURE CORS (Trusted Origins Only)
-const allowedOrigins = [
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'https://a1supermarket.com',
-    'https://www.a1supermarket.com'
-];
-
+// 1. SECURE JWT-ONLY CORS (Zero-Failure Policy)
 app.use(cors({
-    origin: function(origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl)
-        if (!origin) return callback(null, true);
-        
-        // Clean origin (remove trailing slash for comparison)
-        const cleanOrigin = origin.replace(/\/$/, '');
-        
-        if (allowedOrigins.indexOf(cleanOrigin) !== -1 || cleanOrigin.startsWith('http://localhost:')) {
-            return callback(null, true);
-        }
-        return callback(new Error('CORS Policy: This origin is not allowed access.'), false);
-    },
-    credentials: true,
+    origin: '*', // Safe because we use JWT, not cookies
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'x-client-info']
 }));
