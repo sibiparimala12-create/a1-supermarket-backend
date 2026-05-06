@@ -43,9 +43,18 @@ const path = require('path');
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRY = '24h';
 const VALID_ORDER_STATUSES = ['pending', 'packed', 'out_for_delivery', 'collect_from_store', 'delivered', 'cancelled'];
-const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+// 1. Initial Validation: Ensure critical environment variables are present
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY);
+if (!supabaseUrl || !supabaseKey) {
+    console.error('********************************************************');
+    console.error('[CRITICAL ERROR] SUPABASE CREDENTIALS MISSING!');
+    console.error('Make sure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set in Railway Variables.');
+    console.error('********************************************************');
+}
+
+const supabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseKey || 'placeholder');
 
 function sanitize(str) {
     if (typeof str !== 'string') return str;
@@ -299,19 +308,7 @@ const publicApiLimiter = rateLimit({
     message: { error: 'Too many requests. Please try again later.' },
 });
 
-// ============================================================================
-// SUPABASE CONFIGURATION
-// ============================================================================
-
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseKey) {
-    console.error('[FATAL] Supabase credentials missing. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env');
-    process.exit(1);
-}
-
-// Use the supabase client declared earlier
+// Supabase client is already initialized at the top for use in middleware
 
 // ============================================================================
 // CRON JOBS
