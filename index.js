@@ -23,6 +23,7 @@
 
 require('dotenv').config();
 const express = require('express');
+const axios = require('axios');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const helmet = require('helmet');
@@ -35,18 +36,180 @@ const fs = require('fs');
 const path = require('path');
 
 // Internal modules
-const NotificationService = require('./notifications');
-const { generateToken, requireAuth, requireMaster, requireUserAuth } = require('./middleware/auth');
-const {
-    validateLogin,
-    validateOrderStatus,
-    validateOrderCreate,
-    validatePushNotification,
-    validateResetRequest,
-    validateResetExecute,
-    validateAdminApproval,
-    validateRequestAccess,
-} = require('./middleware/validate');
+// ============================================================================
+// SECURITY & VALIDATION LOGIC (Merged for simple deployment)
+// ============================================================================
+
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_EXPIRY = '24h';
+const VALID_ORDER_STATUSES = ['pending', 'packed', 'out_for_delivery', 'collect_from_store', 'delivered', 'cancelled'];
+const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY);
+
+function sanitize(str) {
+    if (typeof str !== 'string') return str;
+    return str.replace(/<[^>]*>/g, '').trim();
+}
+
+// Auth Middlewares
+async function requireAuth(req, res, next) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'Auth required' });
+    const token = authHeader.split(' ')[1];
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const { data: adminProfile } = await supabase.from('admin_profiles').select('email, role, status').eq('email', decoded.email).single();
+        if (!adminProfile || adminProfile.status !== 'approved') return res.status(403).json({ error: 'Access denied' });
+        req.admin = adminProfile;
+        next();
+    } catch (err) { res.status(401).json({ error: 'Invalid token' }); }
+}
+
+async function requireUserAuth(req, res, next) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'Auth required' });
+    const token = authHeader.split(' ')[1];
+    try {
+        const { data, error } = await supabase.auth.getUser(token);
+        if (error || !data.user) return res.status(401).json({ error: 'Invalid token' });
+        req.user = { id: data.user.id, email: data.user.email };
+        next();
+    } catch (err) { res.status(401).json({ error: 'Invalid token' }); }
+}
+
+function requireMaster(req, res, next) {
+    if (!req.admin || req.admin.role !== 'master') return res.status(403).json({ error: 'Master admin access required' });
+    next();
+}
+
+// Validation Middlewares
+function validateLogin(req, res, next) {
+    const { email, password } = req.body;
+    if (!email || !EMAIL_REGEX.test(email.trim())) return res.status(400).json({ error: 'Valid email required' });
+    if (!password || password.length < 6) return res.status(400).json({ error: 'Password too short' });
+    next();
+}
+
+function validateOrderCreate(req, res, next) {
+    const { items, address } = req.body;
+    if (!items || !Array.isArray(items) || items.length === 0) return res.status(400).json({ error: 'Items required' });
+    if (!address || address.trim().length < 5) return res.status(400).json({ error: 'Address required' });
+    next();
+}
+
+/**
+ * Validate Coupon Code
+ */
+async function validateCoupon(req, res, next) {
+    const { code, cart_total } = req.body;
+    if (!code) return res.status(400).json({ error: 'Coupon code required' });
+
+    try {
+        const { data: coupon, error } = await supabase
+            .from('coupons')
+            .select('*')
+            .eq('code', code.toUpperCase())
+            .eq('is_active', true)
+            .single();
+
+        if (error || !coupon) return res.status(404).json({ error: 'Invalid coupon code' });
+
+        // Check expiry
+        if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
+            return res.status(400).json({ error: 'Coupon has expired' });
+        }
+
+        // Check minimum order amount
+        if (cart_total < coupon.min_order_amount) {
+            return res.status(400).json({ error: `Min order for this coupon is ₹${coupon.min_order_amount}` });
+        }
+
+        req.coupon = coupon;
+        next();
+    } catch (err) { res.status(500).json({ error: 'Coupon validation failed' }); }
+}
+
+function validateOrderStatus(req, res, next) {
+    const { status } = req.body;
+    if (!status || !VALID_ORDER_STATUSES.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+    next();
+}
+
+function validatePushNotification(req, res, next) {
+    const { title, body } = req.body;
+    if (!title || title.trim().length < 1) return res.status(400).json({ error: 'Title required' });
+    if (!body || body.trim().length < 1) return res.status(400).json({ error: 'Body required' });
+    next();
+}
+
+function validateResetRequest(req, res, next) {
+    const { email } = req.body;
+    if (!email || !EMAIL_REGEX.test(email.trim())) return res.status(400).json({ error: 'Valid email required' });
+    next();
+}
+
+function validateResetExecute(req, res, next) {
+    const { token, newPassword } = req.body;
+    if (!token || token.length < 32) return res.status(400).json({ error: 'Valid reset token required' });
+    if (!newPassword || newPassword.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters' });
+    next();
+}
+
+function validateAdminApproval(req, res, next) {
+    const { targetEmail, status } = req.body;
+    if (!targetEmail || !EMAIL_REGEX.test(targetEmail.trim())) return res.status(400).json({ error: 'Valid target email required' });
+    if (!status || !['approved', 'rejected', 'revoked'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+    next();
+}
+
+function validateRequestAccess(req, res, next) {
+    const { email, password } = req.body;
+    if (!email || !EMAIL_REGEX.test(email.trim())) return res.status(400).json({ error: 'Valid email required' });
+    if (!password || password.length < 6) return res.status(400).json({ error: 'Password too short' });
+    next();
+}
+
+function generateToken(admin) {
+    return jwt.sign({ email: admin.email, role: admin.role, status: admin.status }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+}
+
+/**
+ * A1 Supermarket Notification Service
+ * Handles real-time alerts via WhatsApp and Push Notifications
+ */
+class NotificationService {
+    static async sendWhatsApp(to, message) {
+        console.log(`[WhatsApp] Triggering message to ${to}: ${message}`);
+        const accountSid = process.env.TWILIO_ACCOUNT_SID;
+        const authToken = process.env.TWILIO_AUTH_TOKEN;
+        if (!accountSid || !authToken) return { success: false, error: 'Config missing' };
+        return { success: true, mock: true };
+    }
+
+    static async sendPush(token, title, body, image_url = null) {
+        if (!token || !token.startsWith('ExponentPushToken')) return { success: false, error: 'Invalid token' };
+        try {
+            const response = await axios.post('https://exp.host/--/api/v2/push/send', {
+                to: token, title, body, data: { image_url }, sound: 'default', priority: 'high', channelId: 'default'
+            });
+            return response.data.data && response.data.data.status === 'ok' ? { success: true } : { success: false };
+        } catch (err) { return { success: false, error: err.message }; }
+    }
+
+    static async broadcastPush(supabase, title, body, image_url = null) {
+        const { data: profiles, error } = await supabase.from('profiles').select('push_token').not('push_token', 'is', null);
+        if (error || !profiles || profiles.length === 0) return { success: true, total: 0 };
+        const results = await Promise.all(profiles.map(p => this.sendPush(p.push_token, title, body, image_url)));
+        return { success: true, total: profiles.length, successful: results.filter(r => r.success).length };
+    }
+
+    static async triggerLowStockAlert(productName, stockCount) {
+        const message = `⚠️ LOW STOCK ALERT: ${productName} is running out! Current stock: ${stockCount}.`;
+        return await this.sendWhatsApp('whatsapp:+910000000000', message);
+    }
+}
+
 
 
 
@@ -148,7 +311,7 @@ if (!supabaseUrl || !supabaseKey) {
     process.exit(1);
 }
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+// Use the supabase client declared earlier
 
 // ============================================================================
 // CRON JOBS
@@ -682,7 +845,7 @@ const orderLimiter = rateLimit({
 app.post('/api/orders', orderLimiter, requireUserAuth, validateOrderCreate, async (req, res) => {
     // Override user_id from the verified JWT (ignore whatever the client sent)
     const user_id = req.user.id;
-    const { items, address, payment_method, delivery_date, delivery_time_slot } = req.body;
+    const { items, address, payment_method, delivery_date, delivery_time_slot, coupon_code } = req.body;
 
     try {
         // 1. TIME VALIDATION: Prevent ordering for past slots
@@ -738,6 +901,36 @@ app.post('/api/orders', orderLimiter, requireUserAuth, validateOrderCreate, asyn
             serverTotal += actualPrice * item.quantity;
         }
 
+        // 2.5 Apply Coupon Discount server-side (SECURE)
+        let discountAmount = 0;
+        let validatedCouponCode = null;
+
+        if (coupon_code) {
+            const { data: coupon, error: couponError } = await supabase
+                .from('coupons')
+                .select('*')
+                .eq('code', coupon_code.toUpperCase())
+                .eq('is_active', true)
+                .single();
+
+            if (!couponError && coupon) {
+                // Validate expiry and min amount again
+                const isExpired = coupon.expires_at && new Date(coupon.expires_at) < new Date();
+                const isMinMet = serverTotal >= coupon.min_order_amount;
+
+                if (!isExpired && isMinMet) {
+                    validatedCouponCode = coupon.code;
+                    if (coupon.discount_type === 'percentage') {
+                        discountAmount = (serverTotal * coupon.discount_value) / 100;
+                    } else {
+                        discountAmount = coupon.discount_value;
+                    }
+                }
+            }
+        }
+
+        const finalTotal = serverTotal - discountAmount;
+
         /**
          * 3. Create the order record.
          * We use the server-calculated total_price to prevent price manipulation
@@ -745,10 +938,12 @@ app.post('/api/orders', orderLimiter, requireUserAuth, validateOrderCreate, asyn
          */
         const { data: orderData, error: orderError } = await supabase.from('orders').insert([{
             user_id,
-            total_price: serverTotal,
+            total_price: finalTotal,
             delivery_address: address,
             delivery_date: delivery_date || null,
             delivery_time_slot: delivery_time_slot || null,
+            coupon_code: validatedCouponCode,
+            discount_amount: discountAmount,
             status: 'pending'
         }]).select();
 
@@ -867,6 +1062,43 @@ app.use((err, req, res, next) => {
 // ============================================================================
 // SERVER START
 // ============================================================================
+
+// ============================================================================
+// COUPON ENDPOINTS
+// ============================================================================
+
+app.post('/api/coupons/validate', validateCoupon, (req, res) => {
+    res.json({
+        success: true,
+        coupon: {
+            code: req.coupon.code,
+            discount_type: req.coupon.discount_type,
+            discount_value: req.coupon.discount_value,
+            description: req.coupon.description
+        }
+    });
+});
+
+app.post('/api/admin/coupons', requireAuth, requireMaster, async (req, res) => {
+    const { code, discount_type, discount_value, min_order_amount, expires_at, description } = req.body;
+    const { data, error } = await supabase.from('coupons').insert([{
+        code: code.toUpperCase(),
+        discount_type,
+        discount_value,
+        min_order_amount,
+        expires_at,
+        description,
+        is_active: true
+    }]).select();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data[0]);
+});
+
+app.get('/api/admin/coupons', requireAuth, async (req, res) => {
+    const { data, error } = await supabase.from('coupons').select('*').order('created_at', { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+});
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`[A1 Supermarket] Secure API server running on port ${PORT} (Listening on all interfaces)`);
