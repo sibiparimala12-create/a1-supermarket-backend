@@ -246,16 +246,15 @@ const PORT = process.env.PORT || 5000;
 // SECURITY MIDDLEWARE
 // ============================================================================
 
-// 1. SECURE JWT-ONLY CORS (Zero-Failure Policy)
-app.use(cors({
-    origin: '*', // Safe because we use JWT, not cookies
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'x-client-info']
-}));
+// 1. SIMPLEST CORS (Most Compatible)
+app.use(cors());
+
+// Connection Test Route
+app.get('/api/ping', (req, res) => res.json({ message: 'pong', timestamp: new Date().toISOString() }));
 
 // Logging for security auditing
 app.use((req, res, next) => {
-    console.log(`[AUTH LOG] ${req.method} ${req.url} | Origin: ${req.headers.origin || 'Native App'}`);
+    console.log(`[API] ${req.method} ${req.url} | Origin: ${req.headers.origin || 'None'}`);
     next();
 });
 
