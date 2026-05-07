@@ -61,11 +61,11 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function generateToken(profile) {
     return jwt.sign(
-        { 
-            email: profile.email, 
-            role: profile.role, 
-            status: profile.status, 
-            isApproved: profile.status === 'approved' 
+        {
+            email: profile.email,
+            role: profile.role,
+            status: profile.status,
+            isApproved: profile.status === 'approved'
         },
         JWT_SECRET,
         { expiresIn: JWT_EXPIRY }
@@ -239,19 +239,29 @@ class NotificationService {
 
 
 const app = express();
-app.set('trust proxy', 1); // Trust first proxy for secure rate limiting behind load balancers/Nginx
-const PORT = process.env.PORT || 5000;
+app.set('trust proxy', 1);
+const PORT = process.env.PORT || 8080;
+
+// JSON Parser (REQUIRED to read Coupon codes)
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // ============================================================================
 // SECURITY MIDDLEWARE
 // ============================================================================
 
-// 1. SIMPLEST CORS (Most Compatible)
-app.use(cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'x-client-info']
-}));
+// 1. NUCLEAR CORS (Manually forced for demo)
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-client-info');
+    
+    // Immediately respond to preflight requests
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    next();
+});
 
 // Connection Test Route
 app.get('/api/ping', (req, res) => res.json({ message: 'pong', timestamp: new Date().toISOString() }));
@@ -548,7 +558,7 @@ app.patch('/api/admin/orders/:id', requireAuth, validateOrderStatus, async (req,
     if (!data || data.length === 0) return res.status(404).json({ error: 'Order not found' });
 
     const order = data[0];
-    
+
     // Send Push Notification to the user
     if (order.profiles && order.profiles.push_token) {
         let title = 'Order Update';
@@ -711,7 +721,7 @@ app.post('/api/admin/approve', requireAuth, requireMaster, validateAdminApproval
 
         if (error) return res.status(500).json({ error: 'Failed to update admin status.' });
         if (!data || data.length === 0) return res.status(404).json({ error: 'Admin profile not found.' });
-        
+
         const actionMsg = status === 'revoked' ? 'removed from the system' : `now ${status}`;
         res.json({ message: `Admin ${targetEmail} is ${actionMsg}`, data });
     } catch (err) {
@@ -790,11 +800,11 @@ app.patch('/api/admin/store/status', requireAuth, (req, res) => {
     if (typeof is_accepting_orders !== 'boolean') {
         return res.status(400).json({ error: 'is_accepting_orders must be a boolean.' });
     }
-    
+
     const settings = getStoreSettings();
     settings.is_accepting_orders = is_accepting_orders;
     saveStoreSettings(settings);
-    
+
     res.json(settings);
 });
 
@@ -846,7 +856,7 @@ app.post('/api/orders', orderLimiter, requireUserAuth, validateOrderCreate, asyn
         const today = new Date().toISOString().split('T')[0];
         if (delivery_date === today && delivery_time_slot) {
             const currentHour = new Date().getHours();
-            
+
             // Extract the start hour from slot (e.g., "10:00 AM - 11:00 AM" -> 10)
             const slotHourMatch = delivery_time_slot.match(/(\d+):00\s*(AM|PM)/);
             if (slotHourMatch) {
@@ -1027,11 +1037,11 @@ app.get('/api/admin/suggestions', requireAuth, async (req, res) => {
                 .from('product_suggestions')
                 .select('*')
                 .order('created_at', { ascending: false });
-            
+
             if (basicError) throw basicError;
             return res.json(basicData || []);
         }
-        
+
         res.json(data || []);
     } catch (err) {
         console.error('[API CRITICAL] Suggestions Fetch Failed:', err.message);
