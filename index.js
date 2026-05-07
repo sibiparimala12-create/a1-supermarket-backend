@@ -29,6 +29,7 @@ const bodyParser = require('body-parser');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { createClient } = require('@supabase/supabase-js');
+const jwt = require('jsonwebtoken');
 const cron = require('node-cron');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
@@ -42,14 +43,44 @@ const path = require('path');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRY = '24h';
-const VALID_ORDER_STATUSES = ['pending', 'packed', 'out_for_delivery', 'collect_from_store', 'delivered', 'cancelled'];
-const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+const VALID_ORDER_STATUSES = ['pending', 'confirmed', 'packed', 'out_for_delivery', 'collect_from_store', 'delivered', 'cancelled'];
+// 1. Initial Validation: Ensure critical environment variables are present
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY);
+if (!supabaseUrl || !supabaseKey) {
+    console.error('********************************************************');
+    console.error('[CRITICAL ERROR] SUPABASE CREDENTIALS MISSING!');
+    console.error('Make sure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set in Railway Variables.');
+    console.error('********************************************************');
+}
+
+const supabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseKey || 'placeholder');
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function sanitize(str) {
     if (typeof str !== 'string') return str;
     return str.replace(/<[^>]*>/g, '').trim();
+}
+
+/**
+ * ============================================================================
+ *  UNIFIED AUTHENTICATION & SECURITY
+ * ============================================================================
+ */
+
+function generateToken(profile) {
+    return jwt.sign(
+        {
+            email: profile.email,
+            role: profile.role,
+            status: profile.status,
+            isApproved: profile.status === 'approved'
+        },
+        JWT_SECRET,
+        { expiresIn: JWT_EXPIRY }
+    );
 }
 
 // Auth Middlewares
@@ -62,6 +93,7 @@ async function requireAuth(req, res, next) {
         const { data: adminProfile } = await supabase.from('admin_profiles').select('email, role, status').eq('email', decoded.email).single();
         if (!adminProfile || adminProfile.status !== 'approved') return res.status(403).json({ error: 'Access denied' });
         req.admin = adminProfile;
+        req.admin.isApproved = adminProfile.status === 'approved';
         next();
     } catch (err) { res.status(401).json({ error: 'Invalid token' }); }
 }
@@ -99,10 +131,12 @@ function validateOrderCreate(req, res, next) {
 }
 
 /**
- * Validate Coupon Code
+ * Validate Coupon Code (OPTIMIZED)
  */
 async function validateCoupon(req, res, next) {
     const { code, cart_total } = req.body;
+    console.log(`[Coupon Debug] Validating code: ${code} for total: ${cart_total}`);
+    
     if (!code) return res.status(400).json({ error: 'Coupon code required' });
 
     try {
@@ -113,21 +147,25 @@ async function validateCoupon(req, res, next) {
             .eq('is_active', true)
             .single();
 
-        if (error || !coupon) return res.status(404).json({ error: 'Invalid coupon code' });
+        if (error || !coupon) {
+            console.warn(`[Coupon Debug] Invalid or inactive coupon: ${code}`);
+            return res.status(404).json({ error: 'Invalid or inactive coupon code' });
+        }
 
-        // Check expiry
         if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
             return res.status(400).json({ error: 'Coupon has expired' });
         }
 
-        // Check minimum order amount
-        if (cart_total < coupon.min_order_amount) {
+        if (Number(cart_total) < Number(coupon.min_order_amount)) {
             return res.status(400).json({ error: `Min order for this coupon is ₹${coupon.min_order_amount}` });
         }
 
         req.coupon = coupon;
         next();
-    } catch (err) { res.status(500).json({ error: 'Coupon validation failed' }); }
+    } catch (err) { 
+        console.error('[Coupon Debug] Crash:', err.message);
+        res.status(500).json({ error: 'Coupon validation failed' }); 
+    }
 }
 
 function validateOrderStatus(req, res, next) {
@@ -170,10 +208,6 @@ function validateRequestAccess(req, res, next) {
     next();
 }
 
-function generateToken(admin) {
-    return jwt.sign({ email: admin.email, role: admin.role, status: admin.status }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
-}
-
 /**
  * A1 Supermarket Notification Service
  * Handles real-time alerts via WhatsApp and Push Notifications
@@ -214,45 +248,36 @@ class NotificationService {
 
 
 const app = express();
-app.set('trust proxy', 1); // Trust first proxy for secure rate limiting behind load balancers/Nginx
-const PORT = process.env.PORT || 5000;
+app.set('trust proxy', 1);
+const PORT = process.env.PORT || 8080;
+
+// JSON Parser (REQUIRED to read Coupon codes)
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // ============================================================================
 // SECURITY MIDDLEWARE
 // ============================================================================
 
-// 1. DEBUG: Open CORS & Verbose Logging
+// 1. NUCLEAR CORS (Manually forced for demo)
 app.use((req, res, next) => {
-    const origin = req.headers.origin;
-    const start = Date.now();
-    
-    console.log(`[NETWORK DEBUG] Incoming ${req.method} request to ${req.url}`);
-    console.log(`[NETWORK DEBUG] Origin: ${origin}`);
-    console.log(`[NETWORK DEBUG] Headers:`, JSON.stringify(req.headers));
-
-    res.on('finish', () => {
-        const duration = Date.now() - start;
-        console.log(`[API] ${req.method} ${req.url} | Status: ${res.statusCode} | ${duration}ms`);
-    });
-    
-    // TEMPORARILY ALLOW ALL FOR DEBUGGING
-    if (origin) {
-        res.header('Access-Control-Allow-Origin', origin);
-    } else {
-        res.header('Access-Control-Allow-Origin', '*');
-    }
-    
+    res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-client-info');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-client-info');
     
-    // Credentials cannot be true if Origin is '*'
-    if (origin) {
-        res.header('Access-Control-Allow-Credentials', 'true');
-    }
-    
+    // Immediately respond to preflight requests
     if (req.method === 'OPTIONS') {
         return res.sendStatus(200);
     }
+    next();
+});
+
+// Connection Test Route
+app.get('/api/ping', (req, res) => res.json({ message: 'pong', timestamp: new Date().toISOString() }));
+
+// Logging for security auditing
+app.use((req, res, next) => {
+    console.log(`[API] ${req.method} ${req.url} | Origin: ${req.headers.origin || 'None'}`);
     next();
 });
 
@@ -265,13 +290,13 @@ app.use(helmet({
 // 3. Body parser with size limit (prevents payload bombs)
 app.use(bodyParser.json({ limit: '1mb' }));
 
-// 4. Global rate limiter — 100 requests per 15 minutes per IP
+// 4. Global rate limiter — Increased to 1000 for the Board Demo
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 200,
+    max: 1000, // Safe for demo with many viewers
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: 'Too many requests. Please try again later.' },
+    message: { error: 'Too many requests from this IP. Please try again in 15 minutes.' },
 });
 app.use(globalLimiter);
 
@@ -299,19 +324,7 @@ const publicApiLimiter = rateLimit({
     message: { error: 'Too many requests. Please try again later.' },
 });
 
-// ============================================================================
-// SUPABASE CONFIGURATION
-// ============================================================================
-
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
-
-if (!supabaseUrl || !supabaseKey) {
-    console.error('[FATAL] Supabase credentials missing. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in .env');
-    process.exit(1);
-}
-
-// Use the supabase client declared earlier
+// Supabase client is already initialized at the top for use in middleware
 
 // ============================================================================
 // CRON JOBS
@@ -554,7 +567,7 @@ app.patch('/api/admin/orders/:id', requireAuth, validateOrderStatus, async (req,
     if (!data || data.length === 0) return res.status(404).json({ error: 'Order not found' });
 
     const order = data[0];
-    
+
     // Send Push Notification to the user
     if (order.profiles && order.profiles.push_token) {
         let title = 'Order Update';
@@ -717,7 +730,7 @@ app.post('/api/admin/approve', requireAuth, requireMaster, validateAdminApproval
 
         if (error) return res.status(500).json({ error: 'Failed to update admin status.' });
         if (!data || data.length === 0) return res.status(404).json({ error: 'Admin profile not found.' });
-        
+
         const actionMsg = status === 'revoked' ? 'removed from the system' : `now ${status}`;
         res.json({ message: `Admin ${targetEmail} is ${actionMsg}`, data });
     } catch (err) {
@@ -796,11 +809,11 @@ app.patch('/api/admin/store/status', requireAuth, (req, res) => {
     if (typeof is_accepting_orders !== 'boolean') {
         return res.status(400).json({ error: 'is_accepting_orders must be a boolean.' });
     }
-    
+
     const settings = getStoreSettings();
     settings.is_accepting_orders = is_accepting_orders;
     saveStoreSettings(settings);
-    
+
     res.json(settings);
 });
 
@@ -852,7 +865,7 @@ app.post('/api/orders', orderLimiter, requireUserAuth, validateOrderCreate, asyn
         const today = new Date().toISOString().split('T')[0];
         if (delivery_date === today && delivery_time_slot) {
             const currentHour = new Date().getHours();
-            
+
             // Extract the start hour from slot (e.g., "10:00 AM - 11:00 AM" -> 10)
             const slotHourMatch = delivery_time_slot.match(/(\d+):00\s*(AM|PM)/);
             if (slotHourMatch) {
@@ -1033,11 +1046,11 @@ app.get('/api/admin/suggestions', requireAuth, async (req, res) => {
                 .from('product_suggestions')
                 .select('*')
                 .order('created_at', { ascending: false });
-            
+
             if (basicError) throw basicError;
             return res.json(basicData || []);
         }
-        
+
         res.json(data || []);
     } catch (err) {
         console.error('[API CRITICAL] Suggestions Fetch Failed:', err.message);
@@ -1098,6 +1111,13 @@ app.get('/api/admin/coupons', requireAuth, async (req, res) => {
     const { data, error } = await supabase.from('coupons').select('*').order('created_at', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);
+});
+
+// ============================================================================
+// 404 JSON HANDLER (The Shield)
+// ============================================================================
+app.use((req, res) => {
+    res.status(404).json({ error: `Route ${req.method} ${req.url} not found on this server.` });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
