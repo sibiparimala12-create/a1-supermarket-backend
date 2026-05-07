@@ -59,6 +59,17 @@ const supabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', 
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+function sanitize(str) {
+    if (typeof str !== 'string') return str;
+    return str.replace(/<[^>]*>/g, '').trim();
+}
+
+/**
+ * ============================================================================
+ *  UNIFIED AUTHENTICATION & SECURITY
+ * ============================================================================
+ */
+
 function generateToken(profile) {
     return jwt.sign(
         {
@@ -72,11 +83,6 @@ function generateToken(profile) {
     );
 }
 
-function sanitize(str) {
-    if (typeof str !== 'string') return str;
-    return str.replace(/<[^>]*>/g, '').trim();
-}
-
 // Auth Middlewares
 async function requireAuth(req, res, next) {
     const authHeader = req.headers.authorization;
@@ -87,6 +93,7 @@ async function requireAuth(req, res, next) {
         const { data: adminProfile } = await supabase.from('admin_profiles').select('email, role, status').eq('email', decoded.email).single();
         if (!adminProfile || adminProfile.status !== 'approved') return res.status(403).json({ error: 'Access denied' });
         req.admin = adminProfile;
+        req.admin.isApproved = adminProfile.status === 'approved';
         next();
     } catch (err) { res.status(401).json({ error: 'Invalid token' }); }
 }
@@ -124,10 +131,12 @@ function validateOrderCreate(req, res, next) {
 }
 
 /**
- * Validate Coupon Code
+ * Validate Coupon Code (OPTIMIZED)
  */
 async function validateCoupon(req, res, next) {
     const { code, cart_total } = req.body;
+    console.log(`[Coupon Debug] Validating code: ${code} for total: ${cart_total}`);
+    
     if (!code) return res.status(400).json({ error: 'Coupon code required' });
 
     try {
@@ -138,21 +147,25 @@ async function validateCoupon(req, res, next) {
             .eq('is_active', true)
             .single();
 
-        if (error || !coupon) return res.status(404).json({ error: 'Invalid coupon code' });
+        if (error || !coupon) {
+            console.warn(`[Coupon Debug] Invalid or inactive coupon: ${code}`);
+            return res.status(404).json({ error: 'Invalid or inactive coupon code' });
+        }
 
-        // Check expiry
         if (coupon.expires_at && new Date(coupon.expires_at) < new Date()) {
             return res.status(400).json({ error: 'Coupon has expired' });
         }
 
-        // Check minimum order amount
-        if (cart_total < coupon.min_order_amount) {
+        if (Number(cart_total) < Number(coupon.min_order_amount)) {
             return res.status(400).json({ error: `Min order for this coupon is ₹${coupon.min_order_amount}` });
         }
 
         req.coupon = coupon;
         next();
-    } catch (err) { res.status(500).json({ error: 'Coupon validation failed' }); }
+    } catch (err) { 
+        console.error('[Coupon Debug] Crash:', err.message);
+        res.status(500).json({ error: 'Coupon validation failed' }); 
+    }
 }
 
 function validateOrderStatus(req, res, next) {
@@ -193,10 +206,6 @@ function validateRequestAccess(req, res, next) {
     if (!email || !EMAIL_REGEX.test(email.trim())) return res.status(400).json({ error: 'Valid email required' });
     if (!password || password.length < 6) return res.status(400).json({ error: 'Password too short' });
     next();
-}
-
-function generateToken(admin) {
-    return jwt.sign({ email: admin.email, role: admin.role, status: admin.status }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
 }
 
 /**
@@ -1102,6 +1111,13 @@ app.get('/api/admin/coupons', requireAuth, async (req, res) => {
     const { data, error } = await supabase.from('coupons').select('*').order('created_at', { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);
+});
+
+// ============================================================================
+// 404 JSON HANDLER (The Shield)
+// ============================================================================
+app.use((req, res) => {
+    res.status(404).json({ error: `Route ${req.method} ${req.url} not found on this server.` });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
