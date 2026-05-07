@@ -43,7 +43,11 @@ const path = require('path');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRY = '24h';
+<<<<<<< HEAD
 const VALID_ORDER_STATUSES = ['pending', 'confirmed', 'packed', 'out_for_delivery', 'collect_from_store', 'delivered', 'cancelled'];
+=======
+const VALID_ORDER_STATUSES = ['pending', 'packed', 'out_for_delivery', 'collect_from_store', 'delivered', 'cancelled'];
+>>>>>>> a90ed5b381952ebbb8b09cbf29196c8681e976e8
 // 1. Initial Validation: Ensure critical environment variables are present
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
