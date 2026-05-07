@@ -573,14 +573,17 @@ app.patch('/api/admin/orders/:id', requireAuth, validateOrderStatus, async (req,
         let title = 'Order Update';
         let body = `Your order status has been updated to ${status}.`;
 
-        if (status === 'packed') {
-            title = 'Order Accepted! ✅';
-            body = 'Your order has been accepted and is being packed.';
-        } else if (status === 'shipped') {
-            title = 'Order Shipped! 🚚';
+        if (status === 'confirmed') {
+            title = 'Order Confirmed! ✅';
+            body = 'Your order has been confirmed and is being processed.';
+        } else if (status === 'packed') {
+            title = 'Order Packed! 📦';
+            body = 'Your order has been packed and is ready for delivery.';
+        } else if (status === 'out_for_delivery') {
+            title = 'Out for Delivery! 🚚';
             body = 'Your order is on the way to you!';
         } else if (status === 'delivered') {
-            title = 'Order Delivered! 📦';
+            title = 'Order Delivered! 🎉';
             body = 'Your order has been successfully delivered. Enjoy!';
         }
 
