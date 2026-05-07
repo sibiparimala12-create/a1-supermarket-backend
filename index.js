@@ -568,7 +568,7 @@ app.patch('/api/admin/orders/:id', requireAuth, validateOrderStatus, async (req,
 
     const order = data[0];
 
-    // Send Push Notification to the user
+    // Send Push Notification to the user (Safe check for profiles relationship)
     if (order.profiles && order.profiles.push_token) {
         let title = 'Order Update';
         let body = `Your order status has been updated to ${status}.`;
