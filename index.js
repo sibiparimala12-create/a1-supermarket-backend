@@ -1058,19 +1058,7 @@ app.get('/api/admin/suggestions', requireAuth, async (req, res) => {
     }
 });
 
-// ============================================================================
-// GLOBAL ERROR HANDLER
-// ============================================================================
 
-app.use((err, req, res, next) => {
-    // CORS error
-    if (err.message && err.message.includes('CORS')) {
-        return res.status(403).json({ error: 'Cross-origin request blocked.' });
-    }
-
-    console.error('[UNHANDLED ERROR]', err.message);
-    res.status(500).json({ error: 'Internal server error.' });
-});
 
 // ============================================================================
 // SERVER START
@@ -1118,6 +1106,20 @@ app.get('/api/admin/coupons', requireAuth, async (req, res) => {
 // ============================================================================
 app.use((req, res) => {
     res.status(404).json({ error: `Route ${req.method} ${req.url} not found on this server.` });
+});
+
+app.use((err, req, res, next) => {
+    // CORS error
+    if (err.message && err.message.includes('CORS')) {
+        return res.status(403).json({ error: 'Cross-origin request blocked.' });
+    }
+
+    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+        return res.status(400).json({ error: 'Invalid JSON payload' });
+    }
+
+    console.error('[UNHANDLED ERROR]', err.message);
+    res.status(500).json({ error: 'Internal server error.' });
 });
 
 app.listen(PORT, '0.0.0.0', () => {
