@@ -547,18 +547,17 @@ app.patch('/api/admin/orders/:id', requireAuth, validateOrderStatus, async (req,
     const { status } = req.body;
 
     // Securely only allow the 'status' field to be updated
-    const updateData = { status };
-
     const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!UUID_REGEX.test(id)) {
         return res.status(400).json({ error: 'Invalid order ID format.' });
     }
 
+    // SIMPLE & STABLE UPDATE
     const { data, error } = await supabase
         .from('orders')
-        .update(updateData)
+        .update({ status })
         .eq('id', id)
-        .select('*, profiles(push_token)'); // Join with profiles to get the token
+        .select();
 
     if (error) {
         console.error(`[API] Error updating order ${id}:`, error.message);
@@ -568,28 +567,16 @@ app.patch('/api/admin/orders/:id', requireAuth, validateOrderStatus, async (req,
 
     const order = data[0];
 
-    // Send Push Notification to the user (Safe check for profiles relationship)
-    if (order.profiles && order.profiles.push_token) {
-        let title = 'Order Update';
-        let body = `Your order status has been updated to ${status}.`;
-
-        if (status === 'confirmed') {
-            title = 'Order Confirmed! ✅';
-            body = 'Your order has been confirmed and is being processed.';
-        } else if (status === 'packed') {
-            title = 'Order Packed! 📦';
-            body = 'Your order has been packed and is ready for delivery.';
-        } else if (status === 'out_for_delivery') {
-            title = 'Out for Delivery! 🚚';
-            body = 'Your order is on the way to you!';
-        } else if (status === 'delivered') {
-            title = 'Order Delivered! 🎉';
-            body = 'Your order has been successfully delivered. Enjoy!';
+    // ATTEMPT PUSH NOTIFICATION (Separately so it doesn't block the update)
+    try {
+        const { data: profile } = await supabase.from('profiles').select('push_token').eq('id', order.user_id).single();
+        if (profile && profile.push_token) {
+            let title = 'Order Update ✅';
+            let body = `Your order is now ${status}.`;
+            NotificationService.sendPush(profile.push_token, title, body).catch(() => {});
         }
-
-        NotificationService.sendPush(order.profiles.push_token, title, body).catch(err => {
-            console.error('[Push Notification] Failed to send:', err.message);
-        });
+    } catch (pushErr) {
+        console.warn('[Push] Optional notification failed:', pushErr.message);
     }
 
     res.json(order);
