@@ -941,18 +941,26 @@ app.post('/api/orders', orderLimiter, requireUserAuth, validateOrderCreate, asyn
          */
         const { data: orderData, error: orderError } = await supabase.from('orders').insert([{
             user_id,
-            total_price: finalTotal,
+            total_amount: finalTotal, // Aligned with schema.sql
             delivery_address: address,
             delivery_date: delivery_date || null,
             delivery_time_slot: delivery_time_slot || null,
             coupon_code: validatedCouponCode,
             discount_amount: discountAmount,
+            payment_method: payment_method || 'COD',
             status: 'pending'
         }]).select();
 
         if (orderError) {
-            console.error('[API] Order Creation Error:', orderError.message);
-            return res.status(400).json({ error: 'Failed to insert order data. Please check your inputs.' });
+            console.error('*****************************************');
+            console.error('[DATABASE ERROR] Order Insertion Failed!');
+            console.error('Details:', orderError.message);
+            console.error('Payload:', { user_id, finalTotal, address });
+            console.error('*****************************************');
+            return res.status(400).json({ 
+                error: 'Failed to insert order data.',
+                details: orderError.message // Returning details to help debug if needed
+            });
         }
 
         if (!orderData || orderData.length === 0) {
@@ -964,14 +972,17 @@ app.post('/api/orders', orderLimiter, requireUserAuth, validateOrderCreate, asyn
             order_id: orderData[0].id,
             product_id: item.product_id,
             quantity: item.quantity,
-            price_at_time: productMap[item.product_id].discount_price || productMap[item.product_id].price
+            price_at_purchase: productMap[item.product_id].discount_price || productMap[item.product_id].price
         }));
 
         const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
         if (itemsError) {
-            console.error('[API] Order Items Error:', itemsError.message);
+            console.error('[DATABASE ERROR] Order Items Insertion Failed:', itemsError.message);
+            // Rollback the order if items fail
             await supabase.from('orders').delete().eq('id', orderData[0].id);
-            return res.status(400).json({ error: 'Failed to save order items.' });
+            return res.status(400).json({ 
+                error: `Failed to save order items: ${itemsError.message}` 
+            });
         }
 
         /**
