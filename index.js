@@ -958,8 +958,7 @@ app.post('/api/orders', orderLimiter, requireUserAuth, validateOrderCreate, asyn
             console.error('Payload:', { user_id, finalTotal, address });
             console.error('*****************************************');
             return res.status(400).json({ 
-                error: 'Failed to insert order data.',
-                details: orderError.message // Returning details to help debug if needed
+                error: `Failed to insert order data: ${orderError.message}` 
             });
         }
 
