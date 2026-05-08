@@ -838,7 +838,7 @@ app.get('/api/products/category/:slug', publicApiLimiter, async (req, res) => {
 // Order-specific rate limiter (SECURE: Prevents spamming order requests)
 const orderLimiter = rateLimit({
     windowMs: 10 * 60 * 1000, // 10 minutes
-    max: 5, // Limit each IP/User to 5 orders per 10 minutes
+    max: 50, // Increased to 50 for testing and high-traffic support
     message: { error: 'Too many order attempts. Please wait 10 minutes before trying again.' },
     standardHeaders: true,
     legacyHeaders: false,
