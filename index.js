@@ -856,8 +856,8 @@ app.post('/api/orders', orderLimiter, requireUserAuth, validateOrderCreate, asyn
         if (delivery_date === today && delivery_time_slot) {
             const currentHour = new Date().getHours();
 
-            // Extract the start hour from slot (e.g., "10:00 AM - 11:00 AM" -> 10)
-            const slotHourMatch = delivery_time_slot.match(/(\d+):00\s*(AM|PM)/);
+            // Extract the start hour from slot (e.g., "10 AM - 11 AM" -> 10)
+            const slotHourMatch = delivery_time_slot.match(/(\d+)\s*(AM|PM)/);
             if (slotHourMatch) {
                 let slotHour = parseInt(slotHourMatch[1]);
                 const ampm = slotHourMatch[2];
