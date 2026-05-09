@@ -126,7 +126,7 @@ BEGIN
     
     -- Update the parent order total
     UPDATE orders 
-    SET total_price = total_price + (NEW.quantity * actual_price)
+    SET total_amount = total_amount + (NEW.quantity * actual_price)
     WHERE id = NEW.order_id;
     
     RETURN NEW;
