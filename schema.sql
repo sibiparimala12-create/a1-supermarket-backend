@@ -61,6 +61,14 @@ CREATE TABLE order_items (
     price_at_time DECIMAL(10, 2) NOT NULL
 );
 
+-- Function to restore stock on cancellation
+CREATE OR REPLACE FUNCTION increment_stock(p_id UUID, p_qty INTEGER)
+RETURNS VOID AS $$
+BEGIN
+    UPDATE products SET stock_quantity = stock_quantity + p_qty WHERE id = p_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- 6. Low Stock Alerts (Admin view or trigger)
 CREATE OR REPLACE VIEW low_stock_alerts AS
 SELECT id, name, stock_quantity

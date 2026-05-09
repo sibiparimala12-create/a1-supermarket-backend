@@ -594,6 +594,20 @@ app.patch('/api/admin/orders/:id', requireAuth, validateOrderStatus, async (req,
 
     const order = data[0];
 
+    // STOCK RESTORATION LOGIC (Billion IQ Guard)
+    if (status === 'cancelled') {
+        try {
+            const { data: items } = await supabase.from('order_items').select('product_id, quantity').eq('order_id', id);
+            if (items && items.length > 0) {
+                for (const item of items) {
+                    await supabase.rpc('increment_stock', { p_id: item.product_id, p_qty: item.quantity });
+                }
+            }
+        } catch (stockErr) {
+            console.error('[CRITICAL] Stock restoration failed during cancellation:', stockErr.message);
+        }
+    }
+
     // ATTEMPT PUSH NOTIFICATION (Separately so it doesn't block the update)
     try {
         const { data: profile } = await supabase.from('profiles').select('push_token').eq('id', order.user_id).single();
