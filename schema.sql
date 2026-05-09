@@ -121,13 +121,12 @@ BEGIN
     SELECT COALESCE(discount_price, price) INTO actual_price 
     FROM products WHERE id = NEW.product_id;
     
-    -- Enforce the correct price
+    -- Enforce the correct price snapshot for history
     NEW.price_at_time := actual_price;
     
-    -- Update the parent order total
-    UPDATE orders 
-    SET total_amount = total_amount + (NEW.quantity * actual_price)
-    WHERE id = NEW.order_id;
+    -- IMPORTANT: We remove the manual total_amount update here 
+    -- because the atomic RPC/Backend already calculates the grand total accurately.
+    -- This prevents "Double Billing".
     
     RETURN NEW;
 END;

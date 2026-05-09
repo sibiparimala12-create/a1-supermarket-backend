@@ -890,6 +890,13 @@ app.post('/api/orders', orderLimiter, requireUserAuth, validateOrderCreate, asyn
     const user_id = req.user.id;
     const { items, address, payment_method, delivery_date, delivery_time_slot, coupon_code } = req.body;
 
+    // 0. STORE STATUS CHECK (Billion IQ Guard)
+    const settings = getStoreSettings();
+    const isPreOrder = !!delivery_date;
+    if (!settings.is_accepting_orders && !isPreOrder) {
+        return res.status(400).json({ error: 'Store is currently closed and not accepting immediate orders. You can place a pre-order for tomorrow!' });
+    }
+
     try {
         // 1. Fetch actual prices & validate stock for ALL items before creating order
         const productIds = items.map(i => i.product_id);
