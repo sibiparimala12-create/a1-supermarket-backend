@@ -279,7 +279,12 @@ class NotificationService {
                 success: true, 
                 total: profiles.length, 
                 successful: successful,
-                failed: pushTokens.length - successful
+                failed: pushTokens.length - successful,
+                debug: {
+                    profilesFetched: profiles.length,
+                    validTokens: pushTokens.length,
+                    usingServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY
+                }
             };
         } catch (err) {
             console.error('[CRITICAL BROADCAST FAILURE]', err.response?.data || err.message);
