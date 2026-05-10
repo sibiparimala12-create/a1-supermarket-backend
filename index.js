@@ -239,7 +239,9 @@ class NotificationService {
             // 1. Filter for valid Expo tokens ONLY (Avoid 400 Bad Request from Expo)
             const pushTokens = (profiles || [])
                 .map(p => p.push_token)
-                .filter(token => token && token.startsWith('ExponentPushToken'));
+                .filter(token => typeof token === 'string' && token.includes('PushToken'));
+
+            console.log(`[Broadcast] Found ${profiles.length} profiles, ${pushTokens.length} valid tokens.`);
 
             if (pushTokens.length === 0) {
                 console.log('[Broadcast] No valid Expo push tokens found.');
@@ -258,7 +260,11 @@ class NotificationService {
                         sound: 'default',
                         priority: 'high'
                     });
-                    if (res.data?.data?.[0]?.status === 'ok' || res.data?.data?.status === 'ok') {
+                    const isOk = res.data?.data?.[0]?.status === 'ok' || 
+                                 res.data?.data?.status === 'ok' ||
+                                 (Array.isArray(res.data?.data) && res.data.data[0]?.status === 'ok');
+
+                    if (isOk) {
                         successful++;
                         return { success: true };
                     }
