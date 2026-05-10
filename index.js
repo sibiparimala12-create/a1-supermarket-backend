@@ -260,9 +260,10 @@ class NotificationService {
                         sound: 'default',
                         priority: 'high'
                     });
-                    const isOk = res.data?.data?.[0]?.status === 'ok' || 
-                                 res.data?.data?.status === 'ok' ||
-                                 (Array.isArray(res.data?.data) && res.data.data[0]?.status === 'ok');
+                    const responseData = res.data?.data;
+                    const isOk = Array.isArray(responseData) 
+                        ? responseData[0]?.status === 'ok' 
+                        : responseData?.status === 'ok';
 
                     if (isOk) {
                         successful++;
@@ -277,12 +278,12 @@ class NotificationService {
 
             return { 
                 success: true, 
-                total: profiles.length, 
+                total: pushTokens.length, 
                 successful: successful,
                 failed: pushTokens.length - successful,
                 debug: {
-                    profilesFetched: profiles.length,
-                    validTokens: pushTokens.length,
+                    profilesInDb: profiles.length,
+                    validTokensFound: pushTokens.length,
                     usingServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY
                 }
             };
