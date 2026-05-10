@@ -231,9 +231,11 @@ class NotificationService {
         } catch (err) { return { success: false, error: err.message }; }
     }
 
-    static async broadcastPush(supabase, title, body, image_url = null) {
+    static async broadcastPush(unused_supabase, title, body, image_url = null) {
         try {
-            const { data: profiles, error } = await supabase.from('profiles').select('push_token').not('push_token', 'is', null);
+            // Master Override: Use direct env vars to ensure service role access
+            const adminClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+            const { data: profiles, error } = await adminClient.from('profiles').select('push_token').not('push_token', 'is', null);
             if (error) throw error;
             
             // 1. Filter for valid Expo tokens ONLY (Avoid 400 Bad Request from Expo)
@@ -245,7 +247,16 @@ class NotificationService {
 
             if (pushTokens.length === 0) {
                 console.log('[Broadcast] No valid Expo push tokens found.');
-                return { success: true, total: 0, successful: 0 };
+                return { 
+                    success: true, 
+                    total: 0, 
+                    successful: 0,
+                    debug: {
+                        profilesInDb: profiles.length,
+                        validTokensFound: 0,
+                        usingServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY
+                    }
+                };
             }
 
             // 2. Send individually to avoid "conflicting projects" error in batches
