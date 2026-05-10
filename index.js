@@ -234,10 +234,19 @@ class NotificationService {
     static async broadcastPush(supabase, title, body, image_url = null) {
         try {
             const { data: profiles, error } = await supabase.from('profiles').select('push_token').not('push_token', 'is', null);
-            if (error || !profiles || profiles.length === 0) return { success: true, total: 0 };
+            if (error) throw error;
+            
+            // 1. Filter for valid Expo tokens ONLY (Avoid 400 Bad Request from Expo)
+            const pushTokens = (profiles || [])
+                .map(p => p.push_token)
+                .filter(token => token && token.startsWith('ExponentPushToken'));
+
+            if (pushTokens.length === 0) {
+                console.log('[Broadcast] No valid Expo push tokens found.');
+                return { success: true, total: 0, successful: 0 };
+            }
 
             // 1,000 Million IQ Scaling: Use Expo Bulk-Send API (Up to 100 per request)
-            const pushTokens = profiles.map(p => p.push_token);
             const chunks = [];
             for (let i = 0; i < pushTokens.length; i += 100) {
                 chunks.push(pushTokens.slice(i, i + 100));
@@ -249,7 +258,7 @@ class NotificationService {
                     to: token,
                     title,
                     body,
-                    data: { image_url },
+                    data: image_url ? { image_url } : {},
                     sound: 'default',
                     priority: 'high'
                 }));
@@ -260,8 +269,9 @@ class NotificationService {
 
             return { success: true, total: profiles.length, successful: totalSent };
         } catch (err) {
-            console.error('[CRITICAL BROADCAST FAILURE]', err.message);
-            return { success: false, error: err.message };
+            console.error('[CRITICAL BROADCAST FAILURE]', err.response?.data || err.message);
+            const detailedError = err.response?.data?.errors?.[0]?.message || err.message;
+            return { success: false, error: `Push failed: ${detailedError}` };
         }
     }
 

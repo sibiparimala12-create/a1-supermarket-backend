@@ -91,23 +91,27 @@ class NotificationService {
             return { success: false, error: error.message };
         }
 
-        if (!profiles || profiles.length === 0) {
-            console.log('[Broadcast] No users with push tokens found.');
+        // 1. Filter for valid Expo tokens ONLY (Avoid 400 Bad Request from Expo)
+        const pushTokens = (profiles || [])
+            .map(p => p.push_token)
+            .filter(token => token && token.startsWith('ExponentPushToken'));
+
+        if (pushTokens.length === 0) {
+            console.log('[Broadcast] No registered recipients with valid Expo tokens found.');
             return { success: true, total: 0, message: 'No registered recipients found' };
         }
 
         // Expo allows batching notifications (up to 100 per request)
-        // For simplicity, we send them all in parallel
-        const results = await Promise.all(profiles.map(p => this.sendPush(p.push_token, title, body, image_url)));
+        const results = await Promise.all(pushTokens.map(token => this.sendPush(token, title, body, image_url)));
         
         const successCount = results.filter(r => r.success).length;
-        console.log(`[Broadcast] Completed. Success: ${successCount}/${profiles.length}`);
+        console.log(`[Broadcast] Completed. Success: ${successCount}/${pushTokens.length}`);
         
         return { 
             success: true, 
             total: profiles.length, 
             successful: successCount,
-            errorCount: profiles.length - successCount
+            errorCount: pushTokens.length - successCount
         };
     }
 
