@@ -246,28 +246,35 @@ class NotificationService {
                 return { success: true, total: 0, successful: 0 };
             }
 
-            // 1,000 Million IQ Scaling: Use Expo Bulk-Send API (Up to 100 per request)
-            const chunks = [];
-            for (let i = 0; i < pushTokens.length; i += 100) {
-                chunks.push(pushTokens.slice(i, i + 100));
-            }
+            // 2. Send individually to avoid "conflicting projects" error in batches
+            let successful = 0;
+            const results = await Promise.all(pushTokens.map(async (token) => {
+                try {
+                    const res = await axios.post('https://exp.host/--/api/v2/push/send', {
+                        to: token,
+                        title,
+                        body,
+                        data: image_url ? { image_url } : {},
+                        sound: 'default',
+                        priority: 'high'
+                    });
+                    if (res.data?.data?.[0]?.status === 'ok' || res.data?.data?.status === 'ok') {
+                        successful++;
+                        return { success: true };
+                    }
+                    return { success: false };
+                } catch (e) {
+                    console.warn(`[Broadcast] Failed for token ${token.substring(0, 15)}:`, e.message);
+                    return { success: false };
+                }
+            }));
 
-            let totalSent = 0;
-            for (const chunk of chunks) {
-                const messages = chunk.map(token => ({
-                    to: token,
-                    title,
-                    body,
-                    data: image_url ? { image_url } : {},
-                    sound: 'default',
-                    priority: 'high'
-                }));
-
-                await axios.post('https://exp.host/--/api/v2/push/send', messages);
-                totalSent += chunk.length;
-            }
-
-            return { success: true, total: profiles.length, successful: totalSent };
+            return { 
+                success: true, 
+                total: profiles.length, 
+                successful: successful,
+                failed: pushTokens.length - successful
+            };
         } catch (err) {
             console.error('[CRITICAL BROADCAST FAILURE]', err.response?.data || err.message);
             const detailedError = err.response?.data?.errors?.[0]?.message || err.message;
