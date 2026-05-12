@@ -263,14 +263,19 @@ class NotificationService {
             let successful = 0;
             const results = await Promise.all(pushTokens.map(async (token) => {
                 try {
-                    const res = await axios.post('https://exp.host/--/api/v2/push/send', {
+                    const payload = {
                         to: token,
                         title,
                         body,
                         data: image_url ? { image_url } : {},
                         sound: 'default',
                         priority: 'high'
-                    });
+                    };
+                    if (image_url) {
+                        payload.image = image_url;
+                    }
+
+                    const res = await axios.post('https://exp.host/--/api/v2/push/send', payload);
                     const responseData = res.data?.data;
                     const isOk = Array.isArray(responseData) 
                         ? responseData[0]?.status === 'ok' 
