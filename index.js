@@ -37,6 +37,26 @@ const fs = require('fs');
 const path = require('path');
 
 // Internal modules
+const admin = require('firebase-admin');
+
+// 1 Trillion IQ Security Guard: Prevent Github Secret Blocks by using Env Vars in Production
+let serviceAccount;
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+} else {
+    try {
+        serviceAccount = require('./firebase-service-account.json');
+    } catch (e) {
+        console.warn("[A1 DEBUG] Local firebase-service-account.json missing. Push notifications will not work until added.");
+    }
+}
+
+if (serviceAccount) {
+    admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+    });
+}
+
 // ============================================================================
 // SECURITY & VALIDATION LOGIC (Merged for simple deployment)
 // ============================================================================
@@ -238,75 +258,56 @@ class NotificationService {
             const { data: profiles, error } = await adminClient.from('profiles').select('push_token').not('push_token', 'is', null);
             if (error) throw error;
             
-            // 1. Filter for valid Expo tokens ONLY (Avoid 400 Bad Request from Expo)
-            const pushTokens = (profiles || [])
+            // Filter for RAW FCM Tokens (Exclude legacy ExponentPushToken)
+            const fcmTokens = (profiles || [])
                 .map(p => p.push_token)
-                .filter(token => typeof token === 'string' && token.includes('PushToken'));
+                .filter(token => typeof token === 'string' && !token.includes('ExponentPushToken'));
 
-            console.log(`[Broadcast] Found ${profiles.length} profiles, ${pushTokens.length} valid tokens.`);
+            console.log(`[Broadcast] Found ${profiles.length} profiles, ${fcmTokens.length} raw FCM tokens.`);
 
-            if (pushTokens.length === 0) {
-                console.log('[Broadcast] No valid Expo push tokens found.');
+            if (fcmTokens.length === 0) {
+                console.log('[Broadcast] No valid FCM push tokens found.');
                 return { 
                     success: true, 
                     total: 0, 
                     successful: 0,
                     debug: {
                         profilesInDb: profiles.length,
-                        validTokensFound: 0,
-                        usingServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY
+                        validTokensFound: 0
                     }
                 };
             }
 
-            // 2. Send individually to avoid "conflicting projects" error in batches
-            let successful = 0;
-            const results = await Promise.all(pushTokens.map(async (token) => {
-                try {
-                    const payload = {
-                        to: token,
-                        title,
-                        body,
-                        data: image_url ? { image_url } : {},
-                        sound: 'default',
-                        priority: 'high'
-                    };
-                    if (image_url) {
-                        payload.image = image_url;
-                    }
-
-                    const res = await axios.post('https://exp.host/--/api/v2/push/send', payload);
-                    const responseData = res.data?.data;
-                    const isOk = Array.isArray(responseData) 
-                        ? responseData[0]?.status === 'ok' 
-                        : responseData?.status === 'ok';
-
-                    if (isOk) {
-                        successful++;
-                        return { success: true };
-                    }
-                    return { success: false };
-                } catch (e) {
-                    console.warn(`[Broadcast] Failed for token ${token.substring(0, 15)}:`, e.message);
-                    return { success: false };
+            // Construct DATA-ONLY Payload for Notifee background rendering
+            const messagePayload = {
+                tokens: fcmTokens,
+                data: {
+                    title: title || 'A1 Supermarket',
+                    body: body || '',
                 }
-            }));
+            };
+            if (image_url) {
+                messagePayload.data.image_url = image_url;
+            }
+
+            // Send via Firebase Admin SDK
+            const response = await admin.messaging().sendEachForMulticast(messagePayload);
+            
+            console.log(`[Firebase Broadcast] Successfully sent ${response.successCount} messages. Failed: ${response.failureCount}`);
 
             return { 
                 success: true, 
-                total: pushTokens.length, 
-                successful: successful,
-                failed: pushTokens.length - successful,
+                total: fcmTokens.length, 
+                successful: response.successCount,
+                failed: response.failureCount,
                 debug: {
                     profilesInDb: profiles.length,
-                    validTokensFound: pushTokens.length,
-                    usingServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY
+                    validTokensFound: fcmTokens.length
                 }
             };
         } catch (err) {
-            console.error('[CRITICAL BROADCAST FAILURE]', err.response?.data || err.message);
-            const detailedError = err.response?.data?.errors?.[0]?.message || err.message;
-            return { success: false, error: `Push failed: ${detailedError}` };
+            console.error('[CRITICAL FIREBASE BROADCAST FAILURE]', err.message);
+            return { success: false, error: `Push failed: ${err.message}` };
         }
     }
 
