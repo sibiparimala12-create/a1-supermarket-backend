@@ -746,7 +746,7 @@ app.post('/api/orders', orderLimiter, requireUserAuth, validateOrderCreate, asyn
             order_id: orderData[0].id,
             product_id: item.product_id,
             quantity: item.quantity,
-            price_at_time: productMap[item.product_id].discount_price || productMap[item.product_id].price
+            price_at_purchase: productMap[item.product_id].discount_price || productMap[item.product_id].price
         }));
 
         const { error: itemsError } = await supabase.from('order_items').insert(orderItems);
