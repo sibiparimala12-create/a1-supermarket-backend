@@ -126,7 +126,7 @@ BEGIN
     
     -- Update the parent order total
     UPDATE orders 
-    SET total_price = total_price + (NEW.quantity * actual_price)
+    SET total_amount = total_amount + (NEW.quantity * actual_price)
     WHERE id = NEW.order_id;
     
     RETURN NEW;
@@ -137,3 +137,27 @@ DROP TRIGGER IF EXISTS tr_secure_calculate_order_item ON order_items;
 CREATE TRIGGER tr_secure_calculate_order_item 
 BEFORE INSERT ON order_items 
 FOR EACH ROW EXECUTE PROCEDURE secure_calculate_order_item();
+
+-- 11. Atomic Stock Management
+CREATE OR REPLACE FUNCTION decrement_stock(p_product_id UUID, p_qty INTEGER)
+RETURNS BOOLEAN AS $$
+DECLARE
+    current_stock INTEGER;
+BEGIN
+    -- Select with row-level locking (FOR UPDATE) to prevent race conditions
+    SELECT stock_quantity INTO current_stock
+    FROM products
+    WHERE id = p_product_id
+    FOR UPDATE;
+
+    IF current_stock >= p_qty THEN
+        UPDATE products
+        SET stock_quantity = stock_quantity - p_qty
+        WHERE id = p_product_id;
+        RETURN TRUE;
+    ELSE
+        RETURN FALSE;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+

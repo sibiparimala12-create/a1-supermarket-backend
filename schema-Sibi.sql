@@ -61,6 +61,14 @@ CREATE TABLE order_items (
     price_at_time DECIMAL(10, 2) NOT NULL
 );
 
+-- Function to restore stock on cancellation
+CREATE OR REPLACE FUNCTION increment_stock(p_id UUID, p_qty INTEGER)
+RETURNS VOID AS $$
+BEGIN
+    UPDATE products SET stock_quantity = stock_quantity + p_qty WHERE id = p_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- 6. Low Stock Alerts (Admin view or trigger)
 CREATE OR REPLACE VIEW low_stock_alerts AS
 SELECT id, name, stock_quantity
@@ -121,13 +129,12 @@ BEGIN
     SELECT COALESCE(discount_price, price) INTO actual_price 
     FROM products WHERE id = NEW.product_id;
     
-    -- Enforce the correct price
+    -- Enforce the correct price snapshot for history
     NEW.price_at_time := actual_price;
     
-    -- Update the parent order total
-    UPDATE orders 
-    SET total_price = total_price + (NEW.quantity * actual_price)
-    WHERE id = NEW.order_id;
+    -- IMPORTANT: We remove the manual total_amount update here 
+    -- because the atomic RPC/Backend already calculates the grand total accurately.
+    -- This prevents "Double Billing".
     
     RETURN NEW;
 END;

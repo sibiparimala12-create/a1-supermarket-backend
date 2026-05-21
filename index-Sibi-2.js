@@ -394,7 +394,7 @@ app.get('/api/admin/stats', requireAuth, async (req, res) => {
         if (productsRes.error) throw productsRes.error;
         if (lowStockRes.error) throw lowStockRes.error;
 
-        const revenue = ordersRes.data?.reduce((acc, curr) => acc + Number(curr.total_price || 0), 0) || 0;
+        const revenue = ordersRes.data?.reduce((acc, curr) => acc + Number(curr.total_amount || 0), 0) || 0;
         const pending = ordersRes.data?.filter(o => o.status === 'pending').length || 0;
 
         res.json({
@@ -554,20 +554,6 @@ app.post('/api/notifications/slogans', requireAuth, validatePushNotification, as
     res.status(201).json(data[0]);
 });
 
-// Delete marketing slogan
-app.delete('/api/notifications/slogans/:id', requireAuth, async (req, res) => {
-    const { id } = req.params;
-    const { data, error } = await supabase
-        .from('marketing_slogans')
-        .delete()
-        .eq('id', id)
-        .select();
-
-    if (error) return res.status(400).json({ error: error.message });
-    if (!data || data.length === 0) return res.status(404).json({ error: 'Slogan not found' });
-    res.json({ message: 'Slogan deleted successfully', data: data[0] });
-});
-
 // Manual push notification broadcast
 app.post('/api/notifications/push-manual', requireAuth, validatePushNotification, async (req, res) => {
     const { title, body, image_url } = req.body;
@@ -723,7 +709,7 @@ app.post('/api/orders', orderLimiter, requireUserAuth, validateOrderCreate, asyn
          */
         const { data: orderData, error: orderError } = await supabase.from('orders').insert([{
             user_id,
-            total_price: serverTotal,
+            total_amount: serverTotal,
             delivery_address: address,
             delivery_date: delivery_date || null,
             delivery_time_slot: delivery_time_slot || null,
