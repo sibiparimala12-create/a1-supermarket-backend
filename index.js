@@ -721,12 +721,14 @@ app.post('/api/orders', orderLimiter, requireUserAuth, validateOrderCreate, asyn
          * We use the server-calculated total_price to prevent price manipulation
          * from the client-side (e.g., someone trying to buy for ₹0.01).
          */
+        const finalAddress = (delivery_date && delivery_time_slot) 
+            ? `[Slot: ${delivery_date} ${delivery_time_slot}]\n${address}` 
+            : address;
+
         const { data: orderData, error: orderError } = await supabase.from('orders').insert([{
             user_id,
-            total_price: serverTotal,
-            delivery_address: address,
-            delivery_date: delivery_date || null,
-            delivery_time_slot: delivery_time_slot || null,
+            total_amount: serverTotal,
+            delivery_address: finalAddress,
             status: 'pending'
         }]).select();
 
